@@ -1,0 +1,41 @@
+---
+title: "Bernoulli-Beta"
+author: "Soni Verma"
+date: "2024-02-01"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+n <- 10
+theta0 <- 0.4
+
+set.seed(100)
+
+Y <- rbinom(n, size = 1, prob = theta0) # simulated data
+
+# prior: Beta(2, 4)
+a <- 2
+b <- 4
+
+# analytical solution for the posterior predictive dist of Y_{n+1}
+
+postpredmean <- sum(Y) + a
+postpredsd <- n + b - sum(Y)
+
+#----------------------------------------------
+# posterior predictive samples
+
+theta.sample <- rbeta(n,a,b)
+Ypred.samples <- rbinom(n,size = 1,prob = theta.sample)
+
+postpredmean.s <- mean(Ypred.samples)
+postpredsd.s <- sd(Ypred.samples)
+
+table <- cbind(c(postpredmean, postpredsd),
+               c(postpredmean.s, postpredsd.s))
+
+colnames(table) <- c("Analytical", "Numerical")
+rownames(table) <- c("Posterior predictive mean", "Posterior predictive SD")
+table <- as.data.frame(table)
+table
+```

@@ -1,0 +1,131 @@
+---
+title: "Assignment - 1"
+author: "Soni Verma"
+date: "2024-01-31"
+output: html_document
+---
+### 1
+```{r, echo = F}
+# Change the values of N and theta as needed
+N <- 50
+theta <- 0.4
+
+# Define the CDF of the binomial distribution
+cdf <- function(x) {
+  pbinom(N * x, size = N, prob = theta)
+}
+
+# Define the CDF derived from the Central Limit Theorem
+ass_cdf <- function(y) {
+  pnorm(y, mean = N * theta, sd = sqrt(N * theta * (1 - theta)))
+}
+
+# Plot the CDF and CLT-CDF
+plot(cdf, from = 0, to = 1, col = "red", lty = 1, ylab = "Probability")
+plot(ass_cdf, from = 0, to = 1, add = TRUE, col = "purple", lty = 3)
+legend("topleft", legend = c("CDF", "CLT-CDF"), col = c("red", "purple"), lty = c(1, 3))
+
+# Evaluate the maximum absolute difference between the two CDFs
+support <- seq(0, 1, by = 1/N)
+result <- max(abs(cdf(support) - ass_cdf(support)))
+
+# Print the result
+cat("Maximum absolute difference between CDF and CLT-CDF:", result, "\n")
+
+```
+
+
+### Question 2
+Distribution of $X_n$ is coming out to a Gamma function with shape parameter $N\alpha$ and rate parameter $N\lambda$.
+
+### Question 3
+
+To check f(x) to be a valid pdf , we have to check two condition: 
+
+- It should be non negative for its entire range.
+
+- On integrating it over its entire range should equal 1e. 
+
+```{r, echo = FALSE, include = FALSE}
+library(pracma)
+
+# Defining integrand function
+integrand <- function(x) {
+  f <- 2*besselK( 2*sqrt(x), nu = 0)  
+  return (f)
+}
+
+# Perform numerical integration
+result <- integrate(integrand, lower = 0, upper = Inf)
+```
+
+ 
+```{r, echo = TRUE}
+print(result)
+```
+
+As we can see, integral value of bessel function on integrating over given space is coming out to be 1 which implies f(x) is a valid pdf. 
+
+### Question 4
+- Joint distribution of X is coming out to be product of  marginal distribution of $X_1$ and product of all conditional distribution from $X_2$ to $X_T$.
+- Conditional distribution of $X_t$ given $X_1$...$X_T$ is only depending on just previous point $X_(t-1)$ . Therefor, it would be normally distributed.
+
+
+### Question 6
+
+By applying Bayes theorem, we get that posterior distribution is coming out to be gamma distribution.
+
+
+### Question 7
+
+Firstly writing function for given curve ,then applying accept reject for generating samples.
+
+```{r , include = FALSE, echo = F}
+library(tictoc)
+```
+
+```{r setup, include=FALSE}
+# Function to check if a point is inside the region
+internal_points <- function(x, y) {
+  (x^2 + y^2 - 1)^3 <= x^2 * y^3
+}
+
+# Function to generate 10000 IID samples using acceptance-rejection sampling
+generate_samples <- function(n) {
+  samples <- matrix(NA, ncol = 2, nrow = n)
+  count <- 0
+  
+  while (count < n) {
+    x <- runif(1, -2, 2)
+    y <- runif(1, -2, 2)
+    
+    if (internal_points(x, y)) {
+      count <- count + 1
+      samples[count, ] <- c(x, y)
+    }
+  }
+  
+  return(samples)
+}
+```
+
+- Cheking time colapsed in generate_samples function using tictoc function using library tictoc.
+
+```{r, echo = FALSE}
+set.seed(100)
+
+# Start the timer
+tic()
+
+# Generating IID samples
+samples <- generate_samples(1e4)
+
+# Stop the timer
+elapsed_time <- toc()
+```
+
+```{r, echo = FALSE}
+# Plotting samples and the region
+plot(samples, col = "purple", pch = 16, main = "Acceptance-Rejection Sampling")
+
+```
