@@ -1,0 +1,591 @@
+---
+title: "Assignment - 5"
+author: "Soni Verma"
+date: "2024-04-15"
+output: html_document
+---
+
+## Question - 1
+
+### *a part*
+
+```{r}
+library(geoR)
+data("gambia")
+
+Y = gambia$pos
+X = gambia[,-3]
+n = length(Y)
+p = ncol(X)
+
+library(rjags)
+
+#part a
+data = list(Y = Y, n = n, p = p, X = X)
+params = c('beta')
+
+model_string_1 = textConnection("model{
+      #Likelihood
+      for(i in 1:n){
+      Y[i] ~ dbinom(probs[i], 1)
+      logit(probs[i]) = inprod(X[i,], beta)
+      }
+      #Priors
+      for(j in 1:p){
+      beta[j] ~ dnorm(0, 1e-3)
+      }
+}")
+
+model_1 = jags.model(model_string_1, data = data,
+                     quiet = TRUE)
+update(model_1, 1e4)
+samples1 = coda.samples(model_1, variable.names = params,
+                        thin = 5, n.iter = 2e4)
+summary(samples1)
+
+```
+
+```{r}
+plot(samples1)
+```
+
+### *b part*
+
+```{r}
+library(tidyr)
+params = c('beta', 'tausq.inv') 
+unique_xy = unique(gambia[,1:2])
+s = nrow(unique_xy)
+index = 1 : s
+s_ind =  index[match(paste(gambia$x, gambia$y), paste(unique_xy$x, unique_xy$y))]
+
+data = list(Y = Y, n = n, p = p, X = X, s_ind = s_ind, s = s)
+
+model_string_2 = textConnection("model{
+      #Likelihood
+      for(i in 1:n){
+      Y[i] ~ dbinom(probs[i], 1)
+      logit(probs[i]) = inprod(X[i,], beta) + alpha[s_ind[i]]
+      }
+      
+      #Random_Effects
+      for(i in 1 : s){
+      alpha[i] ~ dnorm(0, tausq.inv)
+      }
+      
+      #Priors
+      for(j in 1:p){
+      beta[j] ~ dnorm(0, 1e-3)
+      }
+      tausq.inv ~ dgamma(0.01, 0.01)
+}")
+
+model_2 = jags.model(model_string_2, data = data,
+                     quiet = TRUE)
+update(model_2, 1e4)
+samples2 = coda.samples(model_2, variable.names = params,
+                        thin = 5, n.iter = 2e4)
+plot(samples2)
+
+tau_post = samples2[[1]][,8]
+alpha_post = matrix(NA, nrow = s, ncol = length(tau_post))
+for(i in 1 : s){
+  alpha_post[i,] = rnorm(length(tau_post), 0, 1/sqrt(tau_post))
+}
+alpha_post_mean = rowMeans(alpha_post)
+
+library(ggplot2)
+library(viridis)
+ggplot()+
+  geom_point(aes(x = unique_xy$x, y = unique_xy$y, col = alpha_post_mean))+
+  scale_color_viridis()
+
+```
+
+**posterior means of the alphas by their spatial locations**
+
+```{r}
+tau_post = samples2[[1]][,8]
+alpha_post = matrix(NA, nrow = s, ncol = length(tau_post))
+for(i in 1 : s){
+  alpha_post[i,] = rnorm(length(tau_post), 0, 1/sqrt(tau_post))
+}
+alpha_post_mean = rowMeans(alpha_post)
+
+library(ggplot2)
+library(viridis)
+ggplot()+
+  geom_point(aes(x = unique_xy$x, y = unique_xy$y, col = alpha_post_mean))+
+  scale_color_viridis()
+
+```
+
+
+
+## Question - 2
+
+```{r}
+library(rjags)
+library(ggplot2)
+library(MASS)
+data("galaxies")
+Y = galaxies
+hist(Y, breaks = 25)
+n = length(Y)
+
+data = list(Y = Y, N = n, K = 3, alpha = rep(1, 3))
+
+model_string = "model{
+
+  # Likelihood
+  for (i in 1:N) {
+    Y[i] ~ dnorm(mu[Z[i]], tau[Z[i]])
+    Z[i] ~ dcat(theta[])
+  }
+  for (j in 1:K) {
+    mu[j] ~ dnorm(0, 1e-8)
+    tau[j] ~ dgamma(0.01, 0.01)
+  }
+
+  theta[1:K] ~ ddirch(alpha[])
+  
+}"
+
+params = c('mu', 'tau', 'theta')
+
+model = jags.model(textConnection(model_string), data = data,
+                   quiet = TRUE)
+update(model, 2e4)
+samples <- coda.samples(model, variable.names = params, n.iter = 1e4)
+plot(samples)
+```
+
+```{r}
+y = seq(5e3, 4e4, 100)
+S = 1e4
+mu.post = samples[[1]][,1:3]
+tau.post = samples[[1]][,4:6]
+theta.post = samples[[1]][,7:9]
+
+
+post_density = matrix(NA, nrow = S, ncol = 351)
+
+for(i in 1:S){
+  mu <- as.numeric(mu.post[i,])
+  sigma <- as.numeric(1/sqrt(tau.post[i,]))
+  theta <- as.numeric(theta.post[i, ])
+  
+  
+  mix_gauss <- function(x) {
+    theta[1] * dnorm(x, mean = mu[1], sd = sigma[1]) +
+      theta[2] * dnorm(x, mean = mu[2], sd = sigma[2]) +
+      theta[3] * dnorm(x, mean = mu[3], sd = sigma[3])
+  }
+  post_density[i, ] <- sapply(y, mix_gauss)
+}
+
+post_median <- apply(post_density, 2, median)
+post_2.5.quantile <- apply(post_density, 2, quantile, probs = 0.025)
+post_97.5.quantile <- apply(post_density, 2, quantile, probs = 0.975)
+
+
+par(mfrow = c(1,1))
+ggplot()+
+  geom_histogram(aes(x = Y, y = after_stat(density)), col = 'grey')+
+  geom_line(aes(y, post_median, col = 'Median'), size = 1)+
+  geom_line(aes(y, post_2.5.quantile, col = 'Quantile: 0.025'), linetype = 'dashed', size = 1)+
+  geom_line(aes(y, post_97.5.quantile, col = 'Quantile: 0.975'), linetype = 'dashed', size = 1)+
+  labs(col = 'Index')
+
+```
+this mixture model does not fit the data well as the above density estimation  does not visually match the density/histogram plot of Y as seen above
+
+## Question - 3
+
+**Calculating bayes factor**
+
+```{r}
+
+Y = c(563, 10)
+N = c(2820, 27)
+
+bf.c = function(c){
+  p.y.m1 = pgamma(c, Y[1]+1, N[1], log.p = T) + pgamma(c, Y[2]+1, N[2], log.p = T) - log(c^2 * prod(N))
+  p.y.m2  = lfactorial(sum(Y)) - sum(lfactorial(Y)) + 
+    sum(Y * log(N)) - (sum(Y) + 1) * log(sum(N)) + 
+    pgamma(c, sum(Y)+1, sum(N), log.p = T) - log(c)
+  out = exp(p.y.m2 - p.y.m1)
+  return(out)
+}
+
+bf.c(1)
+
+```
+
+```{r}
+bf.c(10)
+```
+
+
+```{r}
+rm(list = ls())
+library(rjags)
+Y1 = 563
+N1 = 2820
+Y2 = 10
+N2 = 27
+
+```
+
+```{r}
+## M1
+model_string1 <- "model{
+  lambda1 ~ dunif(0, 1)
+  lambda2 ~ dunif(0, 1)
+  Y1 ~ dpois(N1 * lambda1)
+  Y2 ~ dpois(N2 * lambda2)
+}"
+
+
+# M2
+model_string2 <- "
+model {
+  lmbdanot ~ dunif(0, 1)
+  Y1 ~ dpois(N1 * lmbdanot)
+  Y2 ~ dpois(N2 * lmbdanot)
+}
+"
+data <- list(Y1 = Y1, N1 = N1, Y2 = Y2, N2 = N2)
+
+
+model1 <- jags.model(textConnection(model_string1), data = data, n.chains = 1, quiet = TRUE)
+update(model1, 10000, progress.bar = "none")
+samps <- coda.samples(model1, variable.names = c("lambda1", "lambda2"),
+                      n.iter = 20000, thin = 5, progress.bar = "none")
+lambda1 <- samps[[1]][ , 1]
+lambda2 <- samps[[1]][ , 2]
+
+
+model2 <- jags.model(textConnection(model_string2), data = data, n.chains = 1, quiet = TRUE)
+update(model2, 10000, progress.bar = "none")
+samps <- coda.samples(model2, variable.names = "lmbdanot",
+                      n.iter = 20000, thin = 5, progress.bar = "none")
+lmbdanot <- samps[[1]][ , 1]
+
+
+loglike.m1 <- sapply(1:4000, function(iter){
+  dpois(Y1, N1*lambda1[iter] ,log = TRUE) + dpois(Y2, N2*lambda2[iter],log = TRUE)})
+  
+loglike.m2 <- sapply(1:4000, function(iter){
+  dpois(Y1, N1*lmbdanot[iter] ,log = TRUE)+ dpois(Y2, N2*lmbdanot[iter],log = TRUE)})
+      
+deviance.m1 <- -2 * loglike.m1
+deviance.m2 <- -2 * loglike.m2
+
+```
+
+**calculating DIC for both the models**
+
+```{r}
+Dbar.m1 <- mean(deviance.m1)
+Dbar.m2 <- mean(deviance.m2)
+
+D.thetahat.m1 <- sum(dpois(Y1, N1*lambda1,log = TRUE ) + dpois(Y2, N2*lambda2,log = TRUE))
+D.thetahat.m2 <- sum(dpois(Y1, N1*lmbdanot,log = TRUE )+ dpois(Y2, N2*lmbdanot ,log = TRUE))
+
+pD.m1 <- Dbar.m1 - D.thetahat.m1
+pD.m2 <- Dbar.m2 - D.thetahat.m2
+DIC1.m1 <- pD.m1 + Dbar.m1
+DIC1.m2 <- pD.m2 + Dbar.m2
+DIC1.m1                                              
+```
+
+**calculating WAIC for both the models**
+
+```{r}
+posmeans.m1 <- mean(loglike.m1)
+posmeans.m2 <- mean(loglike.m2)
+posvars.m1 <- var(loglike.m1)
+posvars.m2 <- var(loglike.m2)
+
+
+WAIC1.m1 <- -2 * posmeans.m1 + 2 * posvars.m1
+WAIC1.m2 <- -2 * posmeans.m2 + 2 *posvars.m2
+WAIC1.m1
+```
+
+
+**For c = 10**
+```{r}
+## M1
+model_string1 <- "model{
+  lambda1 ~ dunif(0, 10)
+  lambda2 ~ dunif(0, 10)
+  Y1 ~ dpois(N1 * lambda1)
+  Y2 ~ dpois(N2 * lambda2)
+}"
+
+
+# M2
+model_string2 <- "
+model {
+  lmbdanot ~ dunif(0, 10)
+  Y1 ~ dpois(N1 * lmbdanot)
+  Y2 ~ dpois(N2 * lmbdanot)
+}
+"
+data <- list(Y1 = Y1, N1 = N1, Y2 = Y2, N2 = N2)
+
+model1 <- jags.model(textConnection(model_string1), data = data, n.chains = 1, quiet = TRUE)
+update(model1, 10000, progress.bar = "none")
+samps <- coda.samples(model1, variable.names = c("lambda1", "lambda2"),
+                      n.iter = 20000, thin = 5, progress.bar = "none")
+lambda1 <- samps[[1]][ , 1]
+lambda2 <- samps[[1]][ , 2]
+
+model2 <- jags.model(textConnection(model_string2), data = data, n.chains = 1, quiet = TRUE)
+update(model2, 10000, progress.bar = "none")
+samps <- coda.samples(model2, variable.names = "lmbdanot",
+                      n.iter = 20000, thin = 5, progress.bar = "none")
+lmbdanot <- samps[[1]][ , 1]
+
+loglike.m1 <- sapply(1:4000, function(iter){
+  dpois(Y1, N1*lambda1[iter] ,log = TRUE) + dpois(Y2, N2*lambda2[iter],log = TRUE)})
+
+loglike.m2 <- sapply(1:4000, function(iter){
+  dpois(Y1, N1*lmbdanot[iter] ,log = TRUE)+ dpois(Y2, N2*lmbdanot[iter],log = TRUE)})
+
+deviance.m1 <- -2 * loglike.m1
+deviance.m2 <- -2 * loglike.m2
+
+# DIC
+Dbar.m1 <- mean(deviance.m1)
+Dbar.m2 <- mean(deviance.m2)
+
+D.thetahat.m1 <- sum(dpois(Y1, N1*lambda1,log = TRUE ) + dpois(Y2, N2*lambda2,log = TRUE))
+D.thetahat.m2 <- sum(dpois(Y1, N1*lmbdanot,log = TRUE )+ dpois(Y2, N2*lmbdanot ,log = TRUE))
+
+pD.m1 <- Dbar.m1 - D.thetahat.m1
+pD.m2 <- Dbar.m2 - D.thetahat.m2
+DIC10.m1 <- pD.m1 + Dbar.m1
+DIC10.m2 <- pD.m2 + Dbar.m2
+DIC10.m1                                              
+DIC10.m2
+
+# WAIC
+
+posmeans.m1 <- mean(loglike.m1)
+posmeans.m2 <- mean(loglike.m2)
+posvars.m1 <- var(loglike.m1)
+posvars.m2 <- var(loglike.m2)
+
+
+WAIC10.m1 <- -2 * posmeans.m1 + 2 * posvars.m1
+WAIC10.m2 <- -2 * posmeans.m2 + 2 *posvars.m2
+WAIC10.m1
+
+
+```
+
+**Comparing DIC and WAIC values for c=1 and c= 10**
+```{r}
+# Create a data frame
+comparison_table <- data.frame(
+  c = c(1, 10),
+  DIC = c(DIC1.m1, DIC10.m1),
+  WAIC = c(WAIC1.m1, WAIC10.m1)
+)
+
+knitr::kable(comparison_table, caption = "Comparison of DIC and WAIC for different values of c")
+
+```
+
+## Question - 4
+
+
+```{r}
+library(geoR)
+data("gambia")
+
+Y = gambia$pos
+X = gambia[,-3]
+
+n = length(Y)
+p = ncol(X)
+
+library(rjags)
+
+data = list(Y = Y, n = n, p = p, X = X)
+
+params = c('D')
+
+model_string_1 = textConnection("model{
+      #Likelihood
+      for(i in 1:n){
+      Y[i] ~ dbinom(probs[i], 1)
+      logit(probs[i]) = inprod(X[i,], beta)
+      }
+      #Priors
+      for(j in 1:p){
+      beta[j] ~ dnorm(0, 1e-3)
+      }
+      # Posterior preditive checks
+      for(i in 1:n){
+      Y1[i] ~ dbinom(probs[i], 1)
+      }
+      D = mean(Y1[])
+}")
+
+
+
+model = jags.model(model_string_1, data = data,
+                     quiet = TRUE)
+update(model, 1e4)
+
+samples = coda.samples(model, variable.names = params,
+                        thin = 5, n.iter = 2e4)
+plot(samples)
+
+D0 = mean(Y)
+D = samples[[1]]
+pval = mean(D > D0)
+library(ggplot2)
+
+ggplot()+
+  geom_density(aes(x = D, y = after_stat(density)), size = 1)+
+  geom_vline(aes(xintercept = D0, col = 'Data'), size = 1)+
+  labs(col = 'Index',
+       title = 'Posterior Predictive Check',
+       y = 'Posterior Probability')
+```
+p value near 0 or 1 indicates bad fit
+
+## Question - 5
+
+```{r}
+library(datasets)
+data("WWWusage")
+
+Y = WWWusage
+n = length(WWWusage)
+data = list(Y=Y, n=n)
+model_string.1 = textConnection("model{
+
+  # L = 1
+  
+  for(t in 5:n){
+    mu[t] = beta[1] + beta[2] * Y[t-1] 
+    Y[t] ~ dnorm(mu[t], tau)
+  }
+  
+  beta[1] ~ dnorm(0, 1e-4)
+  beta[2] ~ dnorm(0, 1e-4)
+  tau ~ dgamma(0.1, 0.1)
+  sigma = sqrt(1/tau)
+}")
+
+m1 = jags.model(model_string.1, data=data, n.chains=1, quiet=T)
+update(m1, 1e4, progress.bar="none")
+samp1 = coda.samples(m1, variable.names=c("beta", "sigma"), n.iter=2e4, thin=5)
+
+model_string.2 = textConnection("model{
+
+  # L = 2
+  
+  for(t in 5:n){
+    mu[t] = beta[1] + beta[2] * Y[t-1] + beta[3] * Y[t-2]
+    Y[t] ~ dnorm(mu[t], tau)
+  }
+  
+  beta[1] ~ dnorm(0, 1e-4)
+  beta[2] ~ dnorm(0, 1e-4)
+  beta[3] ~ dnorm(0, 1e-4)
+  tau ~ dgamma(0.1, 0.1)
+  sigma = sqrt(1/tau)
+}")
+
+m2 = jags.model(model_string.2, data=data, n.chains=1, quiet=T)
+update(m2, 1e4, progress.bar="none")
+samp2 = coda.samples(m2, variable.names=c("beta", "sigma"), n.iter=2e4, thin=5)
+
+model_string.3 = textConnection("model{
+  # L = 3
+  
+  for(t in 5:n){
+    mu[t] = beta[1] + beta[2] * Y[t-1] + beta[3] * Y[t-2] + beta[4] * Y[t-3]
+    Y[t] ~ dnorm(mu[t], tau)
+  }
+  
+  beta[1] ~ dnorm(0, 1e-4)
+  beta[2] ~ dnorm(0, 1e-4)
+  beta[3] ~ dnorm(0, 1e-4)
+  beta[4] ~ dnorm(0, 1e-4)
+  tau ~ dgamma(0.1, 0.1)
+  sigma = sqrt(1/tau)
+}")
+
+m3 = jags.model(model_string.3, data=data, n.chains=1, quiet=T)
+update(m3, 1e4, progress.bar="none")
+samp3 = coda.samples(m3, variable.names=c("beta", "sigma"), n.iter=2e4, thin=5)
+
+model_string.4 = textConnection("model{
+
+  # L = 4
+  
+  for(t in 5:n){
+    mu[t] = beta[1] + beta[2] * Y[t-1] + beta[3] * Y[t-2] + beta[4] * Y[t-3] + beta[5] * Y[t-4]
+    Y[t] ~ dnorm(mu[t], tau)
+  }
+  
+  beta[1] ~ dnorm(0, 1e-4)
+  beta[2] ~ dnorm(0, 1e-4)
+  beta[3] ~ dnorm(0, 1e-4)
+  beta[4] ~ dnorm(0, 1e-4)
+  beta[5] ~ dnorm(0, 1e-4)
+  tau ~ dgamma(0.1, 0.1)
+  sigma = sqrt(1/tau)
+}")
+
+m4 = jags.model(model_string.4, data=data, n.chains=1, quiet=T)
+update(m4, 1e4, progress.bar="none")
+samp4 = coda.samples(m4, variable.names=c("beta", "sigma"), n.iter=2e4, thin=5)
+
+```
+
+**Comparing model using WAIC**
+
+```{r}
+post_samples.num = nrow(samp1[[1]])
+log_likelihood_vector = function(beta, sigma){
+  l = length(beta)
+  ans = sapply(5:n, function(i){
+    mu = sum(beta[2:l] * Y[(i-1):(i-l+1)])
+    t = dnorm(Y[i], mu, sigma, log=T)
+    return(t)
+  }) 
+  return(ans)
+}
+
+log_lik.m1 = sapply(1:post_samples.num, function(r) log_likelihood_vector(samp1[[1]][r, 1:2], samp1[[1]][r, 3]))
+log_lik.m2 = sapply(1:post_samples.num, function(r) log_likelihood_vector(samp2[[1]][r, 1:3], samp2[[1]][r, 4]))
+log_lik.m3 = sapply(1:post_samples.num, function(r) log_likelihood_vector(samp3[[1]][r, 1:4], samp3[[1]][r, 5]))
+log_lik.m4 = sapply(1:post_samples.num, function(r) log_likelihood_vector(samp4[[1]][r, 1:5], samp4[[1]][r, 6]))
+
+pos_means.m1 = apply(log_lik.m1, 1, mean)
+pos_means.m2 = apply(log_lik.m2, 1, mean)
+pos_means.m3 = apply(log_lik.m3, 1, mean)
+pos_means.m4 = apply(log_lik.m4, 1, mean)
+
+pos_var.m1 = apply(log_lik.m1, 1, var)
+pos_var.m2 = apply(log_lik.m2, 1, var)
+pos_var.m3 = apply(log_lik.m3, 1, var)
+pos_var.m4 = apply(log_lik.m4, 1, var)
+
+WAIC.m1 = -2*sum(pos_means.m1) + 2*sum(pos_var.m1)
+WAIC.m2 = -2*sum(pos_means.m2) + 2*sum(pos_var.m2)
+WAIC.m3 = -2*sum(pos_means.m3) + 2*sum(pos_var.m3)
+WAIC.m4 = -2*sum(pos_means.m4) + 2*sum(pos_var.m4)
+
+```
+
+we get lowest WAIC for m3: optimal L = 3
